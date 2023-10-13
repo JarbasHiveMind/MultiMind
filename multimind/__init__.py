@@ -46,19 +46,11 @@ def on_stopping():
 class MultiMindInternalProtocol(HiveMindListenerInternalProtocol):
 
     def register_bus_handlers(self):
-        pass
+        pass  # bus is per client now, done on_open
 
     @property
     def clients(self) -> Dict[str, HiveMindClientConnection]:
         return MultiMindProtocol.clients
-
-    def handle_internal_mycroft(self, message: str):
-        """ forward internal messages to clients if they are the target
-        here is where the client isolation happens,
-        clients only get responses to their own messages"""
-
-        print("from minicroft bus")
-        print(777, message)
 
 
 class MultiMindProtocol(HiveMindListenerProtocol):
@@ -69,9 +61,11 @@ class MultiMindProtocol(HiveMindListenerProtocol):
         self.register_client_handlers(client)
 
     def handle_client_disconnected(self, client: HiveMindClientConnection):
-        LOG.info(f"Stopping FakeCroft for client: {client.name}")
-        client.fakecroft.stop()
         super().handle_client_disconnected(client)
+        client_keys = [c.key for _, c in MultiMindProtocol.clients.items()]
+        if client.key not in client_keys:
+            LOG.info(f"Stopping brain for key: {client.key}")
+            client.fakecroft.stop()
 
     def register_client_handlers(self, client: HiveMindClientConnection):
         LOG.debug(f"registering MultiMind mycroft bus handlers for client: {client.name}")
@@ -125,14 +119,21 @@ class MultiMindBusEventHandler(MessageBusEventHandler):
         # TODO - json_database keeping skill_id list per client
         self.client.skill_ids = DEFAULT_SKILLS
         self.client.bus = FakeBus()
-        LOG.info(f"Creating new MiniCroft for client: {name}")
-        self.client.fakecroft = MiniCroft(DEFAULT_SKILLS, bus=self.client.bus)
-        self.client.fakecroft.start()
+
+        if key not in MultiMind.brains:
+            LOG.info(f"Creating new brain for access key: {key}")
+            MultiMind.brains[key] = MiniCroft(DEFAULT_SKILLS, bus=self.client.bus)
+            MultiMind.brains[key].start()
+
+        LOG.info(f"Assigning brain for client: {name}")
+        self.client.fakecroft = MultiMind.brains[key]
+
         self.protocol.handle_new_client(self.client)
         # self.write_message(Message("connected").serialize())
 
 
 class MultiMind(HiveMindService):
+    brains: dict = {}
 
     def __init__(self,
                  alive_hook: Callable = on_alive,
