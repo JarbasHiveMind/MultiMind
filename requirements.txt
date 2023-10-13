@@ -1,0 +1,3 @@
+ovos_core
+ovos-skill-hello-world
+jarbas_hive_mind
