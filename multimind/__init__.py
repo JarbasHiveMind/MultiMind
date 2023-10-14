@@ -1,25 +1,19 @@
-import asyncio
-import os
-import os.path
 from typing import Callable, Dict, Any, Optional
 
-from hivemind_bus_client.identity import NodeIdentity
 from hivemind_core.database import ClientDatabase
-from hivemind_core.protocol import HiveMindListenerProtocol, HiveMindClientConnection, HiveMindNodeType, HiveMindListenerInternalProtocol
-from hivemind_core.service import HiveMindService, MessageBusEventHandler, create_self_signed_cert
+from hivemind_core.protocol import HiveMindListenerProtocol, HiveMindClientConnection, HiveMindNodeType, \
+    HiveMindListenerInternalProtocol
+from hivemind_core.service import HiveMindService, MessageBusEventHandler
+from json_database import JsonStorageXDG
 from ovos_bus_client.session import Session
-from ovos_config import Configuration
 from ovos_utils.log import LOG
 from ovos_utils.messagebus import FakeBus
-from ovos_utils.process_utils import ProcessStatus, StatusCallbackMap
-from ovos_utils.xdg_utils import xdg_data_home
 from poorman_handshake import HandShake, PasswordHandShake
-from tornado import web, ioloop
-from tornado.platform.asyncio import AnyThreadEventLoopPolicy
 
 from multimind.minicroft import MiniCroft
 
-DEFAULT_SKILLS = ["skill-ovos-hello-world.openvoiceos"]
+DEFAULT_SKILLS = ["skill-ovos-hello-world.openvoiceos",
+                  "skill-ovos-fallback-unknown.openvoiceos"]
 PREMIUM_SKILLS = []
 
 
@@ -116,20 +110,24 @@ class MultiMindBusEventHandler(MessageBusEventHandler):
                 self.close()
                 return
 
-        # TODO - json_database keeping skill_id list per client
-        self.client.skill_ids = DEFAULT_SKILLS
-        self.client.bus = FakeBus()
+        db = JsonStorageXDG("multimind", subfolder="hivemind")
+        if key not in db:
+            LOG.debug(f"assigning default skills to {key}")
+            db[key] = DEFAULT_SKILLS
+            db.store()
+
+        LOG.info(f"Assigning brain for client: {name}")
+        LOG.info(f"available skills: {db[key]}")
 
         if key not in MultiMind.brains:
             LOG.info(f"Creating new brain for access key: {key}")
-            MultiMind.brains[key] = MiniCroft(DEFAULT_SKILLS, bus=self.client.bus)
+            MultiMind.brains[key] = MiniCroft(db[key], bus=FakeBus())
             MultiMind.brains[key].start()
 
-        LOG.info(f"Assigning brain for client: {name}")
+        self.client.bus = MultiMind.brains[key].bus
         self.client.fakecroft = MultiMind.brains[key]
 
         self.protocol.handle_new_client(self.client)
-        # self.write_message(Message("connected").serialize())
 
 
 class MultiMind(HiveMindService):

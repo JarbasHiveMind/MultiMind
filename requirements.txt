@@ -1,3 +1,4 @@
 ovos_core
 ovos-skill-hello-world
+ovos-skill-fallback-unknown
 jarbas_hive_mind
